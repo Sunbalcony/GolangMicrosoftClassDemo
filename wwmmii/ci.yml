@@ -1,0 +1,39 @@
+image: docker:stable
+stages:
+  - package
+  - docker_build
+  - deploy_k8s
+variables:
+  KUBECONFIG: /etc/deploy/config
+  MAVEN_OPTS: "-Dmaven.repo.local=/opt/cache/.m2/repository"
+mvn_build_job:
+  image: maven:3.6.2-jdk-8
+  stage: package
+  tags:
+    - k8s-runner
+  script:
+    - mvn package -B -DskipTests
+    - cp target/test-0.1.jar /opt/cache
+docker_build_job:
+  image: docker:latest
+  stage: docker_build
+  tags:
+    - k8s-runner
+  script:
+    - docker login -u $REGISTRY_USERNAME -p $REGISTRY_PASSWORD registry.cn-huhehaote.aliyuncs.com
+    - mkdir target
+    - cp /opt/cache/test-0.1.jar target/test-0.1.jar
+    - mv target/test-0.1.jar target/javademo.jar.jar
+    - docker build -t registry.cn-huhehaote.aliyuncs.com/demorgt/$CI_IMAGE:latest .
+    - docker push registry.cn-huhehaote.aliyuncs.com/demorgt/$CI_IMAGE:latest
+deploy_k8s_job:
+  image: registry.cn-hangzhou.aliyuncs.com/haoshuwei24/kubectl:1.16.6
+  stage: deploy_k8s
+  tags:
+    - k8s-runner
+  script:
+    - mkdir -p /etc/deploy
+    - echo $kube_config |base64 -d > $KUBECONFIG
+    - sed -i "s/IMAGE/$CI_IMAGE/g" deployment.yaml
+    - cat deployment.yaml
+    - kubectl apply -f deployment.yaml -n public
